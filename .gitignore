@@ -5,3 +5,4 @@ PROP-Pose-Dataset/*
 *.mtl
 *.json
 *.tar.gz
+*.pth
