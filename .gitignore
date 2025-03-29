@@ -1,2 +1,7 @@
-PROP-pose-Dataset/*
+PROP-Pose-Dataset/*
 *.png
+*.pyc
+*.obj
+*.mtl
+*.json
+*.tar.gz
