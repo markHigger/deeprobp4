@@ -393,23 +393,43 @@ class PoseCNN(nn.Module):
             # print(bbx.dtype)
             # print(bbx[:,0:4].dtype)
 
-            bbx_selected = IOUselection(bbx, gt_bbx, threshold=self.iou_threshold)
+            pred_filtered_bbxs = IOUselection(bbx, gt_bbx, self.iou_threshold)
             # bbx_selected = bbx
+            # loss_dict["loss_R"] = 1e9
+            if pred_filtered_bbxs.shape[0] > 0:
+                loss_dict['loss_R'] = 0.5
+                # print(pred_filtered_bbxs)
+                quaternions = self.RotationBranch(feat1, feat2, pred_filtered_bbxs[:,0:5])
+                pred_rot, label_pred = self.estimateRotation(quaternions, pred_filtered_bbxs)
+                gtRot = self.gtRotation(pred_filtered_bbxs, input_dict)
+                print(f'pred rot: {torch.max(quaternions)}')
+                # print(f'pred rot: {pred_rot}')
+                # print(gtRot)
+                # print(label_pred)
+                # print(self.models_pcd)
+                loss_r = loss_Rotation(pred_rot, gtRot, label_pred, self.models_pcd)
+                print(f'loss = {loss_r}')
+                if loss_r == loss_r:
+                    loss_dict['loss_R'] = loss_r
+                # print(rots_found)
+                # print(f'bbx: {bbx_selected.shape}')
+                # print(input_dict['label'].shape)
+                # print(input_dict['RTs'].shape)
+                # gt_R = self.gtRotation(bbx_selected, input_dict)
+                # print(f'gt_r: {gt_R.shape}')
+                # for box_idx in range(rots_found.shape[0]):
+                #     quats = rots_found[box_idx, :].view(10,-1)
+                #     rotation_R = quaternion_to_matrix(quats)
 
-            if bbx_selected.shape[0] > 0:
-                print(bbx_selected)
-                rots_found = self.RotationBranch(feat1, feat2, bbx_selected[:,0:5])
-                for box_idx in range(rots_found.shape[0]):
-                    quats = rots_found[box_idx, :].view(4,-1)
-                    print(quats.shape)
-                print(bbx_selected.shape)
-                print(input_dict['label'].shape)
-                print(self.models_pcd.shape)
-                print(input_dict['RTs'].shape)
+                    
+                    # loss_dict["loss_R"] += loss_Rotation(rotation_R, input_dict['RTs'], input_dict['label'], self.models_pcd)
+
+
+                
                 # rotation_R = quaternion_to_matrix(bbx_selected)
                 # print(rotation_R.shape)
 
-                loss_dict["loss_R"] = loss_Rotation(quats, input_dict['RTs'], input_dict['label'], self.models_pcd) 
+                # loss_dict["loss_R"] = loss_Rotation(quats, input_dict['RTs'], input_dict['label'], self.models_pcd) 
 
             ######################################################################
             #                            END OF YOUR CODE                        #
