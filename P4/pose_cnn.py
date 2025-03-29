@@ -178,9 +178,10 @@ class TranslationBranch(nn.Module):
         kaiming_normal_(self.conv_feat2.weight, mode='fan_in', nonlinearity='relu')
         self.conv_feat2.bias.data.fill_(0)
     
-        self.conv_out = nn.Conv2d(hidden_layer_dim, 3 * num_classes, kernel_size=1)
+        self.conv_out = nn.Conv2d(hidden_layer_dim, 3*num_classes, kernel_size=1)
         kaiming_normal_(self.conv_out.weight, mode='fan_in', nonlinearity='relu')
         self.conv_out.bias.data.fill_(0)
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -205,13 +206,7 @@ class TranslationBranch(nn.Module):
 
         combo_feat = feat1 + feat2_upsampled
         combo_upsample = nn.functional.interpolate(combo_feat, scale_factor = 8.0)
-        out = nn.functional.relu(self.conv_out(combo_upsample))
-
-        translation = out
-        # probability = nn.functional.softmax(out, dim=1)
-        # segmentation = torch.argmax(probability, dim=1)
-        # bbx = self.label2bbx(segmentation)
-        
+        translation = nn.functional.relu(self.conv_out(combo_upsample))
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -230,28 +225,23 @@ class RotationBranch(nn.Module):
         # the kaiming_normal initializer and each bias vector to zeros.      #
         ######################################################################
         # Replace "pass" statement with your code
-        self.roi_shape = roi_shape
         self.num_classes = num_classes
-        self.RoI_pool_feat1 = RoIPool(roi_shape, 1)
-        # kaiming_normal_(self.RoI_pool_feat1.weight, mode='fan_in', nonlinearity='relu')
-        # self.RoI_pool_feat1.bias.data.fill_(0)
+        self.roi_shape = roi_shape
+        self.RoI_feat1 = RoIPool(roi_shape, 1)
 
-        self.RoI_pool_feat2 = RoIPool(roi_shape, 1)
-        # kaiming_normal_(self.RoI_pool_feat2.weight, mode='fan_in', nonlinearity='relu')
-        # self.RoI_pool_feat2.bias.data.fill_(0)
-
-        self.fc_layer1 = nn.Linear(feature_dim * roi_shape * roi_shape, hidden_dim)
+        self.RoI_feat2 = RoIPool(roi_shape, 1)
+        
+        self.fc_layer1 = nn.Linear(feature_dim*roi_shape*roi_shape, hidden_dim)
         kaiming_normal_(self.fc_layer1.weight, mode='fan_in', nonlinearity='relu')
         self.fc_layer1.bias.data.fill_(0)
 
-        self.fc_layer2 = nn.Linear(hidden_dim, hidden_dim)  
+        self.fc_layer2 = nn.Linear(hidden_dim, hidden_dim)
         kaiming_normal_(self.fc_layer2.weight, mode='fan_in', nonlinearity='relu')
-        self.fc_layer2.bias.data.fill_(0)   
+        self.fc_layer2.bias.data.fill_(0)
         
-        self.fc_layer3 = nn.Linear(hidden_dim, 4 * num_classes)     
+        self.fc_layer3 = nn.Linear(hidden_dim, 4*num_classes)
         kaiming_normal_(self.fc_layer3.weight, mode='fan_in', nonlinearity='relu')
         self.fc_layer3.bias.data.fill_(0)
-        
 
         ######################################################################
         #                            END OF YOUR CODE                        #
@@ -275,27 +265,15 @@ class RotationBranch(nn.Module):
         ######################################################################
         # Replace "pass" statement with your code
         bbx = bbx.to(feature1.dtype)
-        feat1 = self.RoI_pool_feat1(feature1, bbx)
-        feat2 = self.RoI_pool_feat1(feature2, bbx)
+        feat1 = self.RoI_feat1(feature1, bbx)
+        feat2 = self.RoI_feat2(feature2, bbx)
 
-        feat_combined = feat1 + feat2
-        feat_combined_flat = feat_combined.view(feat_combined.shape[0],-1)
-
-
+        feat_combo = feat1 + feat2
+        feat_flat = feat_combo.view(feat_combo.shape[0], -1)
         
-        # print(feat_combined_flat.shape)
-        
-        layer1_out = nn.functional.leaky_relu(self.fc_layer1(feat_combined_flat))
+        layer1_out = nn.functional.leaky_relu(self.fc_layer1(feat_flat))
         layer2_out = nn.functional.leaky_relu(self.fc_layer2(layer1_out))
         quaternion = nn.functional.leaky_relu(self.fc_layer3(layer2_out))
-        # feat2 = nn.functional.relu(self.conv_feat2(feature2))
-        # feat2_upsampled = nn.functional.interpolate(feat2, size=feat1.shape[2:])
-
-        # combo_feat = feat1 + feat2_upsampled
-        # combo_upsample = nn.functional.interpolate(combo_feat, scale_factor = 8.0)
-        # out = nn.functional.relu(self.conv_out(combo_upsample))
-
-        # translation = out
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -373,63 +351,26 @@ class PoseCNN(nn.Module):
             # identifying the predicted regions of interest with acceptable IOU 
             # with the ground truth bounding boxes.
             # If no ROIs result from the selection, don't compute the loss_R
+
+            #for key, val in input_dict.items():
+            #    print(f"{key}: shape is {val.shape}")
             
             # Replace "pass" statement with your code
-            #Input = 
-            # rgb
-            # depth
-            # objs_id
-            # label
-            # bbx
-            # RTs
-            # centermaps
-            # centers
             feat1, feat2 = self.FeatExtract(input_dict)
             probability, segmentation, bbx = self.SegmentBranch(feat1, feat2)
             loss_dict["loss_segmentation"] = loss_cross_entropy(probability, input_dict['label'])
             translation = self.TransBranch(feat1, feat2)
+            testTranslation = self.estimateTrans(translation, bbx, segmentation)
             l1_loss = torch.nn.L1Loss()
-            loss_dict["loss_centermap"] = l1_loss(translation, input_dict['centermaps'])
-            # print(bbx.dtype)
-            # print(bbx[:,0:4].dtype)
-
-            pred_filtered_bbxs = IOUselection(bbx, gt_bbx, self.iou_threshold)
-            # bbx_selected = bbx
-            # loss_dict["loss_R"] = 1e9
-            if pred_filtered_bbxs.shape[0] > 0:
-                loss_dict['loss_R'] = 0
-                # print(pred_filtered_bbxs)
-                quaternions = self.RotationBranch(feat1, feat2, pred_filtered_bbxs[:,0:5])
-                pred_rot, label_pred = self.estimateRotation(quaternions, pred_filtered_bbxs)
-                gtRot = self.gtRotation(pred_filtered_bbxs, input_dict)
-                # print(f'pred rot: {torch.max(quaternions}')
-                # print(f'pred rot: {pred_rot}')
-                # print(gtRot)
-                # print(label_pred)
-                # print(self.models_pcd)
-                loss_r = loss_Rotation(pred_rot, gtRot, label_pred, self.models_pcd)
-                print(f'loss = {loss_r}')
-                if loss_r == loss_r:
-                    loss_dict['loss_R'] = loss_r
-                # print(rots_found)
-                # print(f'bbx: {bbx_selected.shape}')
-                # print(input_dict['label'].shape)
-                # print(input_dict['RTs'].shape)
-                # gt_R = self.gtRotation(bbx_selected, input_dict)
-                # print(f'gt_r: {gt_R.shape}')
-                # for box_idx in range(rots_found.shape[0]):
-                #     quats = rots_found[box_idx, :].view(10,-1)
-                #     rotation_R = quaternion_to_matrix(quats)
-
-                    
-                    # loss_dict["loss_R"] += loss_Rotation(rotation_R, input_dict['RTs'], input_dict['label'], self.models_pcd)
-
-
-                
-                # rotation_R = quaternion_to_matrix(bbx_selected)
-                # print(rotation_R.shape)
-
-                # loss_dict["loss_R"] = loss_Rotation(quats, input_dict['RTs'], input_dict['label'], self.models_pcd) 
+            loss_dict["loss_centermap"] = l1_loss(testTranslation, input_dict["centermaps"])
+            bbx_selected = IOUselection(bbx, gt_bbx, self.iou_threshold)
+            if(bbx_selected.shape[0] > 0):
+                loss_dict["loss_R"] = 0.0
+                rotations = self.RotationBranch(feat1, feat2, bbx_selected[:,0:5])
+                predRot,label_pred = self.estimateRotation(rotations, bbx_selected)
+                #print(predRot.shape)
+                gtRot = self.gtRotation(bbx_selected, input_dict)
+                loss_dict['loss_R'] = loss_Rotation(predRot, gtRot, label_pred, self.models_pcd)
 
             ######################################################################
             #                            END OF YOUR CODE                        #
@@ -448,15 +389,12 @@ class PoseCNN(nn.Module):
                 feat1, feat2 = self.FeatExtract(input_dict)
                 probability, segmentation, bbx = self.SegmentBranch(feat1, feat2)
                 translation = self.TransBranch(feat1, feat2)
+                #pred_T = self.estimateTrans(translation, bbx, segmentation)
                 rotations = self.RotationBranch(feat1, feat2, bbx[:,0:5])
-                pred_centers, pred_depths = HoughVoting(segmentation, translation)
-                # print(rotations.get_device())
-                # pred_centers = pred_centers.to(rotations.get_device())
-                # pred_depths = pred_depths.to(rotations.get_device())
-                # print(pred_centers.get_device())
-                # print(pred_depths.get_device())
-                # print(bbx.get_device())
-                output_dict = self.generate_pose(rotations, pred_centers, pred_depths, bbx)
+                predRot, label_pred = self.estimateRotation(rotations, bbx)
+                pred_centers, pred_depth = HoughVoting(segmentation, translation)
+                output_dict = self.generate_pose(predRot, pred_centers, pred_depth, bbx)
+
                 ######################################################################
                 #                            END OF YOUR CODE                        #
                 ######################################################################
