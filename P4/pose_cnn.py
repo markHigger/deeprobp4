@@ -82,6 +82,7 @@ class SegmentationBranch(nn.Module):
         self.num_classes = num_classes
         self.conv_feat1 = nn.Conv2d(512, hidden_layer_dim, kernel_size=1)
         kaiming_normal_(self.conv_feat1.weight, mode='fan_in', nonlinearity='relu')
+        self.conv_feat1.bias.data.fill_(0)
 
         self.conv_feat2 = nn.Conv2d(512, hidden_layer_dim, kernel_size=1)
         kaiming_normal_(self.conv_feat2.weight, mode='fan_in', nonlinearity='relu')
@@ -168,7 +169,18 @@ class TranslationBranch(nn.Module):
         # the kaiming_normal initializer and each bias vector to zeros.      #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        self.num_classes = num_classes
+        self.conv_feat1 = nn.Conv2d(512, hidden_layer_dim, kernel_size=1)
+        kaiming_normal_(self.conv_feat1.weight, mode='fan_in', nonlinearity='relu')
+        self.conv_feat1.bias.data.fill_(0)
+
+        self.conv_feat2 = nn.Conv2d(512, hidden_layer_dim, kernel_size=1)
+        kaiming_normal_(self.conv_feat2.weight, mode='fan_in', nonlinearity='relu')
+        self.conv_feat2.bias.data.fill_(0)
+    
+        self.conv_out = nn.Conv2d(hidden_layer_dim, 3 * num_classes, kernel_size=1)
+        kaiming_normal_(self.conv_out.weight, mode='fan_in', nonlinearity='relu')
+        self.conv_out.bias.data.fill_(0)
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -187,7 +199,19 @@ class TranslationBranch(nn.Module):
         # TODO: Implement forward pass of translation branch.                #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        feat1 = nn.functional.relu(self.conv_feat1(feature1))
+        feat2 = nn.functional.relu(self.conv_feat2(feature2))
+        feat2_upsampled = nn.functional.interpolate(feat2, size=feat1.shape[2:])
+
+        combo_feat = feat1 + feat2_upsampled
+        combo_upsample = nn.functional.interpolate(combo_feat, scale_factor = 8.0)
+        out = nn.functional.relu(self.conv_out(combo_upsample))
+
+        translation = out
+        # probability = nn.functional.softmax(out, dim=1)
+        # segmentation = torch.argmax(probability, dim=1)
+        # bbx = self.label2bbx(segmentation)
+        
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -206,7 +230,29 @@ class RotationBranch(nn.Module):
         # the kaiming_normal initializer and each bias vector to zeros.      #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        self.roi_shape = roi_shape
+        self.num_classes = num_classes
+        self.RoI_pool_feat1 = RoIPool(roi_shape, 1)
+        # kaiming_normal_(self.RoI_pool_feat1.weight, mode='fan_in', nonlinearity='relu')
+        # self.RoI_pool_feat1.bias.data.fill_(0)
+
+        self.RoI_pool_feat2 = RoIPool(roi_shape, 1)
+        # kaiming_normal_(self.RoI_pool_feat2.weight, mode='fan_in', nonlinearity='relu')
+        # self.RoI_pool_feat2.bias.data.fill_(0)
+
+        self.fc_layer1 = nn.Linear(feature_dim * roi_shape * roi_shape, hidden_dim)
+        kaiming_normal_(self.fc_layer1.weight, mode='fan_in', nonlinearity='relu')
+        self.fc_layer1.bias.data.fill_(0)
+
+        self.fc_layer2 = nn.Linear(hidden_dim, hidden_dim)  
+        kaiming_normal_(self.fc_layer2.weight, mode='fan_in', nonlinearity='relu')
+        self.fc_layer2.bias.data.fill_(0)   
+        
+        self.fc_layer3 = nn.Linear(hidden_dim, 4 * num_classes)     
+        kaiming_normal_(self.fc_layer3.weight, mode='fan_in', nonlinearity='relu')
+        self.fc_layer3.bias.data.fill_(0)
+        
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -228,7 +274,28 @@ class RotationBranch(nn.Module):
         # TODO: Implement forward pass of rotation branch.                   #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        bbx = bbx.to(feature1.dtype)
+        feat1 = self.RoI_pool_feat1(feature1, bbx)
+        feat2 = self.RoI_pool_feat1(feature2, bbx)
+
+        feat_combined = feat1 + feat2
+        feat_combined_flat = feat_combined.view(feat_combined.shape[0],-1)
+
+
+        
+        # print(feat_combined_flat.shape)
+        
+        layer1_out = nn.functional.leaky_relu(self.fc_layer1(feat_combined_flat))
+        layer2_out = nn.functional.leaky_relu(self.fc_layer2(layer1_out))
+        quaternion = nn.functional.leaky_relu(self.fc_layer3(layer2_out))
+        # feat2 = nn.functional.relu(self.conv_feat2(feature2))
+        # feat2_upsampled = nn.functional.interpolate(feat2, size=feat1.shape[2:])
+
+        # combo_feat = feat1 + feat2_upsampled
+        # combo_upsample = nn.functional.interpolate(combo_feat, scale_factor = 8.0)
+        # out = nn.functional.relu(self.conv_out(combo_upsample))
+
+        # translation = out
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -255,6 +322,8 @@ class PoseCNN(nn.Module):
         # Replace "pass" statement with your code
         self.FeatExtract = FeatureExtraction(pretrained_backbone)
         self.SegmentBranch = SegmentationBranch()
+        self.TranslationBranch = TranslationBranch()
+        self.RotationBranch = RotationBranch()
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -306,9 +375,42 @@ class PoseCNN(nn.Module):
             # If no ROIs result from the selection, don't compute the loss_R
             
             # Replace "pass" statement with your code
+            #Input = 
+            # rgb
+            # depth
+            # objs_id
+            # label
+            # bbx
+            # RTs
+            # centermaps
+            # centers
             feat1, feat2 = self.FeatExtract(input_dict)
             probability, segmentation, bbx = self.SegmentBranch(feat1, feat2)
             loss_dict["loss_segmentation"] = loss_cross_entropy(probability, input_dict['label'])
+            translation = self.TranslationBranch(feat1, feat2)
+            l1_loss = torch.nn.L1Loss()
+            loss_dict["loss_centermap"] = l1_loss(translation, input_dict['centermaps'])
+            # print(bbx.dtype)
+            # print(bbx[:,0:4].dtype)
+
+            bbx_selected = IOUselection(bbx, gt_bbx, threshold=self.iou_threshold)
+            # bbx_selected = bbx
+
+            if bbx_selected.shape[0] > 0:
+                print(bbx_selected)
+                rots_found = self.RotationBranch(feat1, feat2, bbx_selected[:,0:5])
+                for box_idx in range(rots_found.shape[0]):
+                    quats = rots_found[box_idx, :].view(4,-1)
+                    print(quats.shape)
+                print(bbx_selected.shape)
+                print(input_dict['label'].shape)
+                print(self.models_pcd.shape)
+                print(input_dict['RTs'].shape)
+                # rotation_R = quaternion_to_matrix(bbx_selected)
+                # print(rotation_R.shape)
+
+                loss_dict["loss_R"] = loss_Rotation(quats, input_dict['RTs'], input_dict['label'], self.models_pcd) 
+
             ######################################################################
             #                            END OF YOUR CODE                        #
             ######################################################################
