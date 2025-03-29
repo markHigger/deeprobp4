@@ -79,7 +79,18 @@ class SegmentationBranch(nn.Module):
         # each embedding layer in this network.                              #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        self.num_classes = num_classes
+        self.conv_feat1 = nn.Conv2d(512, hidden_layer_dim, kernel_size=1)
+        kaiming_normal_(self.conv_feat1.weight, mode='fan_in', nonlinearity='relu')
+
+        self.conv_feat2 = nn.Conv2d(512, hidden_layer_dim, kernel_size=1)
+        kaiming_normal_(self.conv_feat2.weight, mode='fan_in', nonlinearity='relu')
+        self.conv_feat2.bias.data.fill_(0)
+    
+        self.conv_out = nn.Conv2d(hidden_layer_dim, num_classes + 1, kernel_size=1)
+        kaiming_normal_(self.conv_out.weight, mode='fan_in', nonlinearity='relu')
+        self.conv_out.bias.data.fill_(0)
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -107,7 +118,18 @@ class SegmentationBranch(nn.Module):
         # TODO: Implement forward pass of instance segmentation branch.      #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        feat1 = nn.functional.relu(self.conv_feat1(feature1))
+        feat2 = nn.functional.relu(self.conv_feat2(feature2))
+        feat2_upsampled = nn.functional.interpolate(feat2, size=feat1.shape[2:])
+
+        combo_feat = feat1 + feat2_upsampled
+        combo_upsample = nn.functional.interpolate(combo_feat, scale_factor = 8.0)
+        out = nn.functional.relu(self.conv_out(combo_upsample))
+
+        probability = nn.functional.softmax(out, dim=1)
+        segmentation = torch.argmax(probability, dim=1)
+        bbx = self.label2bbx(segmentation)
+        
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -231,7 +253,8 @@ class PoseCNN(nn.Module):
         # TranslationBranch, and RotationBranch for use in PoseCNN           #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        self.FeatExtract = FeatureExtraction(pretrained_backbone)
+        self.SegmentBranch = SegmentationBranch()
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -248,7 +271,6 @@ class PoseCNN(nn.Module):
             'RTs'
         }
         """
-
 
         if self.training:
             loss_dict = {
@@ -284,7 +306,9 @@ class PoseCNN(nn.Module):
             # If no ROIs result from the selection, don't compute the loss_R
             
             # Replace "pass" statement with your code
-            pass
+            feat1, feat2 = self.FeatExtract(input_dict)
+            probability, segmentation, bbx = self.SegmentBranch(feat1, feat2)
+            loss_dict["loss_segmentation"] = loss_cross_entropy(probability, input_dict['label'])
             ######################################################################
             #                            END OF YOUR CODE                        #
             ######################################################################
@@ -299,7 +323,8 @@ class PoseCNN(nn.Module):
                 # TODO: Implement PoseCNN's forward pass for inference.              #
                 ######################################################################
                 # Replace "pass" statement with your code
-                pass
+                feat1, feat2 = self.FeatExtract(input_dict)
+                probability, segmentation, bbx = self.SegmentBranch(feat1, feat2)
                 ######################################################################
                 #                            END OF YOUR CODE                        #
                 ######################################################################
