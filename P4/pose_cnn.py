@@ -392,6 +392,8 @@ class PoseCNN(nn.Module):
                 #pred_T = self.estimateTrans(translation, bbx, segmentation)
                 rotations = self.RotationBranch(feat1, feat2, bbx[:,0:5])
                 predRot, label_pred = self.estimateRotation(rotations, bbx)
+                # print(torch.max(segmentation))
+                # print(translation)
                 pred_centers, pred_depth = HoughVoting(segmentation, translation)
                 output_dict = self.generate_pose(predRot, pred_centers, pred_depth, bbx)
 

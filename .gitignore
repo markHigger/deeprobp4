@@ -6,3 +6,4 @@ PROP-Pose-Dataset/*
 *.json
 *.tar.gz
 *.pth
+*.pkl

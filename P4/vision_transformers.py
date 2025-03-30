@@ -53,7 +53,12 @@ def patchify(x, patch_size):
     # You are NOT allowed to use anything in torch.nn in other places. #
     ####################################################################
     # Replace "pass" statement with your code
-    pass
+    H_prime = H // patch_size
+    W_prime = W // patch_size
+
+    patches = x.reshape(N, C, H_prime, patch_size, W_prime, patch_size)
+    
+    out = patches.permute(0, 2, 4, 3, 5, 1).reshape(N, H_prime * W_prime, patch_size * patch_size * C)
     #####################################################################
     #                          END OF YOUR CODE                         #
     #####################################################################
@@ -99,13 +104,13 @@ class Attention(Module):
         #                                                                   #
         #####################################################################
         # Replace None statements with your code
-        self.scale = None
-        self.query = None
-        self.key = None
-        self.value = None
-        self.attend = None
-        self.dropout = None
-        self.out_proj = None
+        self.scale = 1 / torch.sqrt(torch.tensor(embed_dim))
+        self.query = torch.nn.Linear(embed_dim, hidden_dim)
+        self.key = torch.nn.Linear(embed_dim, hidden_dim)
+        self.value = torch.nn.Linear(embed_dim, hidden_dim)
+        self.attend = torch.nn.Softmax(dim=-1)
+        self.dropout = torch.nn.Dropout(dropout)
+        self.out_proj = torch.nn.Linear(hidden_dim,embed_dim)
         ################################################################
         #                      END OF YOUR CODE                        #
         ################################################################
@@ -141,7 +146,15 @@ class Attention(Module):
         # should store the intermediate output of softmax(q * k.T / sqrt(D))#
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        q = self.query(query)  
+        k = self.key(key)     
+        v = self.value(value)  
+
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        attention = self.attend(attn_scores) 
+        out = torch.matmul(attention, v)
+        out = self.dropout(out)
+        out = self.out_proj(out)
         ################################################################
         #                      END OF YOUR CODE                        #
         ################################################################
@@ -197,13 +210,14 @@ class MultiHeadAttention(Module):
         #
         #####################################################################
         # Replace None statements with your code
-        self.scale = None
-        self.query = None
-        self.key = None
-        self.value = None
-        self.attend = None
-        self.dropout = None
-        self.out_proj = None
+        
+        self.scale = 1 / torch.sqrt(torch.tensor(embed_dim //num_heads))         
+        self.query = Linear(embed_dim, hidden_dim // num_heads)         
+        self.key = Linear(embed_dim, hidden_dim // num_heads)         
+        self.value = Linear(embed_dim, hidden_dim // num_heads)
+        self.attend = Softmax(-1)
+        self.dropout = Dropout(dropout)
+        self.out_proj = Linear(hidden_dim // num_heads, embed_dim)
         ################################################################
         #                      END OF YOUR CODE                        #
         ################################################################
@@ -234,7 +248,26 @@ class MultiHeadAttention(Module):
         # Hint: use torch.matmul to perform a batched matrix-multiply       #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+
+
+        Q = self.query(query)  
+        K = self.key(key)    
+        V = self.value(value)  
+
+        # attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        # attention = self.attend(attn_scores) 
+        # out = torch.matmul(attention, v)
+        # out = self.dropout(out)
+        # out = self.out_proj(out)
+
+        attn_scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale
+        attention = self.attend(attn_scores) 
+        out = torch.matmul(attention, V)
+        out = self.dropout(out)
+        out = self.out_proj(out)
+
+
+
         ################################################################
         #                      END OF YOUR CODE                        #
         ################################################################
