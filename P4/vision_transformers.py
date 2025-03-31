@@ -372,30 +372,19 @@ class LayerNorm_fn(object):
         # Replace "pass" statement with your code
         # dsigma = dout * mean * gamma / var**2
 
-        # 1. Compute dgamma (gradient with respect to gamma)
         dgamma = torch.sum(torch.sum(dout * div, dim=0), dim=0)
-        # dgamma = dout * div #torch.sum(dout * div, dim=0)
 
-        # 2. Compute dbeta (gradient with respect to beta)
         dbeta = torch.sum(torch.sum(dout,dim=0), dim=0)
 
-        # 3. Compute ddiv (gradient with respect to div)
-        ddiv = torch.sum(torch.sum(dout * gamma, dim=0), dim=0) # The scaling factor gamma comes into play here
-        
+        dout_norm = dout * gamma
 
-        # 4. Compute dsqrt (gradient with respect to sqrt)
-        dsqrt = torch.sum(ddiv * diff, dim=-1, keepdim=True)  # Sum over the D dimension
-        dsqrt *= -0.5 * isqrt**3  # Derivative of sqrt(var + eps)
+        dvar_full = dout_norm * diff * -0.5 * vareps ** -1.5
+        dvar = torch.sum(torch.sum(dvar_full, dim=0))
+        dmean1 = torch.sum(torch.sum(dout_norm *-1 * isqrt, dim=0))
+        dmean2 = dvar * -2 * diff
+        dmean = dmean1 + dmean2
 
-        # 5. Compute dvar (gradient with respect to variance)
-        dvar = dsqrt * 2 * diff / D
-
-        print(ddiv.shape)
-        print(isqrt.shape)
-        # 6. Compute dx (gradient with respect to x)
-        dx = ddiv * isqrt  # Gradient of the normalized term
-        dx += dvar * 2 * diff / D  # Propagate through the variance
-        dx += torch.sum(dvar, dim=-1, keepdim=True) / D  # Account for the mean shift
+        dx = dout_norm*isqrt + dvar * 2 * diff/D + dmean/D
 
         
         #                      END OF YOUR CODE                         #
