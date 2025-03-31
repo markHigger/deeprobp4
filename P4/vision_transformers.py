@@ -212,12 +212,12 @@ class MultiHeadAttention(Module):
         # Replace None statements with your code
         
         self.scale = 1 / torch.sqrt(torch.tensor(embed_dim //num_heads))         
-        self.query = Linear(embed_dim, hidden_dim // num_heads)         
-        self.key = Linear(embed_dim, hidden_dim // num_heads)         
-        self.value = Linear(embed_dim, hidden_dim // num_heads)
+        self.query = Linear(embed_dim, hidden_dim)         
+        self.key = Linear(embed_dim, hidden_dim )         
+        self.value = Linear(embed_dim, hidden_dim)
         self.attend = Softmax(-1)
         self.dropout = Dropout(dropout)
-        self.out_proj = Linear(hidden_dim // num_heads, embed_dim)
+        self.out_proj = Linear(hidden_dim , embed_dim)
         ################################################################
         #                      END OF YOUR CODE                        #
         ################################################################
@@ -249,22 +249,23 @@ class MultiHeadAttention(Module):
         #####################################################################
         # Replace "pass" statement with your code
 
-
         Q = self.query(query)  
         K = self.key(key)    
         V = self.value(value)  
 
-        # attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-        # attention = self.attend(attn_scores) 
-        # out = torch.matmul(attention, v)
-        # out = self.dropout(out)
-        # out = self.out_proj(out)
+        d_k = D // self.num_heads
+        
+        Q = Q.view(N, S, self.num_heads, d_k).transpose(1,2)
+        K = K.view(N, T, self.num_heads, d_k).transpose(1,2)
+        V = V.view(N, T, self.num_heads, d_k).transpose(1,2)
 
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale
         attention = self.attend(attn_scores) 
-        out = torch.matmul(attention, V)
-        out = self.dropout(out)
-        out = self.out_proj(out)
+        heads = torch.matmul(attention, V)
+        heads = self.dropout(heads)
+        heads_cat = heads.transpose(1,2).contiguous().view(N, S, D)
+        print(heads_cat.shape)
+        out = self.out_proj(heads_cat)
 
 
 
@@ -320,7 +321,17 @@ class LayerNorm_fn(object):
         # should accept input of shape (*, D)                            #
         ##################################################################
         # Replace "pass" statement with your code
-        pass
+        mean = torch.mean(x, -1, keepdim=True)
+        var = torch.var(x, -1, keepdim=True)
+        diff = (x - mean) 
+        vareps = var + eps
+        sqrt = torch.sqrt(vareps)
+        isqrt = 1 / sqrt
+        div = isqrt * diff
+        out = gamma * div + beta
+
+        cache = x, gamma, beta, mean, var, diff, vareps, sqrt, isqrt, div
+
         ################################################################
         #                           END OF YOUR CODE                   #
         ################################################################
@@ -359,8 +370,34 @@ class LayerNorm_fn(object):
         # accept input of shape (*, D)                                      #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
-        #################################################################
+        # dsigma = dout * mean * gamma / var**2
+
+        # 1. Compute dgamma (gradient with respect to gamma)
+        dgamma = torch.sum(torch.sum(dout * div, dim=0), dim=0)
+        # dgamma = dout * div #torch.sum(dout * div, dim=0)
+
+        # 2. Compute dbeta (gradient with respect to beta)
+        dbeta = torch.sum(torch.sum(dout,dim=0), dim=0)
+
+        # 3. Compute ddiv (gradient with respect to div)
+        ddiv = torch.sum(torch.sum(dout * gamma, dim=0), dim=0) # The scaling factor gamma comes into play here
+        
+
+        # 4. Compute dsqrt (gradient with respect to sqrt)
+        dsqrt = torch.sum(ddiv * diff, dim=-1, keepdim=True)  # Sum over the D dimension
+        dsqrt *= -0.5 * isqrt**3  # Derivative of sqrt(var + eps)
+
+        # 5. Compute dvar (gradient with respect to variance)
+        dvar = dsqrt * 2 * diff / D
+
+        print(ddiv.shape)
+        print(isqrt.shape)
+        # 6. Compute dx (gradient with respect to x)
+        dx = ddiv * isqrt  # Gradient of the normalized term
+        dx += dvar * 2 * diff / D  # Propagate through the variance
+        dx += torch.sum(dvar, dim=-1, keepdim=True) / D  # Account for the mean shift
+
+        
         #                      END OF YOUR CODE                         #
         #################################################################
 
