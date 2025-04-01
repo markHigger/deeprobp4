@@ -321,8 +321,6 @@ class LayerNorm_fn(object):
         # should accept input of shape (*, D)                            #
         ##################################################################
         # Replace "pass" statement with your code
-        gamma = gamma.to(x.get_device())
-        beta = beta.to(x.get_device())
         mean = torch.mean(x, -1, keepdim=True)
         var = torch.var(x, -1, unbiased=False, keepdim=True)
         diff = (x - mean) 
