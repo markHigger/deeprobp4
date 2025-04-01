@@ -701,6 +701,8 @@ def create_vit_solver_instance(data_dict, dtype, device):
         patch_size=4,
         dtype=dtype)
     
+    model.to(device)
+    
     solver = Solver(model,
                     data_dict,
                     num_epochs=100,
