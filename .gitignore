@@ -5,5 +5,5 @@ PROP-Pose-Dataset/*
 *.mtl
 *.json
 *.tar.gz
-*.pth
+posecnn_model.pth
 *.pkl
