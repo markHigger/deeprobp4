@@ -211,7 +211,7 @@ class MultiHeadAttention(Module):
         #####################################################################
         # Replace None statements with your code
         
-        self.scale = 1 / embed_dim**0.5        
+        self.scale = 1 / (hidden_dim // num_heads)**0.5        
         self.query = Linear(embed_dim, hidden_dim)         
         self.key = Linear(embed_dim, hidden_dim )         
         self.value = Linear(embed_dim, hidden_dim)
