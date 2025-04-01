@@ -104,7 +104,7 @@ class Attention(Module):
         #                                                                   #
         #####################################################################
         # Replace None statements with your code
-        self.scale = 1 / torch.sqrt(torch.tensor(embed_dim))
+        self.scale = 1 / embed_dim**0.5
         self.query = torch.nn.Linear(embed_dim, hidden_dim)
         self.key = torch.nn.Linear(embed_dim, hidden_dim)
         self.value = torch.nn.Linear(embed_dim, hidden_dim)
@@ -211,7 +211,7 @@ class MultiHeadAttention(Module):
         #####################################################################
         # Replace None statements with your code
         
-        self.scale = 1 / torch.sqrt(torch.tensor(embed_dim //num_heads))         
+        self.scale = 1 / embed_dim**0.5        
         self.query = Linear(embed_dim, hidden_dim)         
         self.key = Linear(embed_dim, hidden_dim )         
         self.value = Linear(embed_dim, hidden_dim)
@@ -253,7 +253,7 @@ class MultiHeadAttention(Module):
         K = self.key(key)    
         V = self.value(value)  
 
-        d_k = D // self.num_heads
+        d_k = self.hidden_dim // self.num_heads
         
         Q = Q.view(N, S, self.num_heads, d_k).transpose(1,2)
         K = K.view(N, T, self.num_heads, d_k).transpose(1,2)
@@ -263,8 +263,8 @@ class MultiHeadAttention(Module):
         attention = self.attend(attn_scores) 
         heads = torch.matmul(attention, V)
         heads = self.dropout(heads)
-        heads_cat = heads.transpose(1,2).contiguous().view(N, S, D)
-        print(heads_cat.shape)
+        heads_cat = heads.transpose(1,2).contiguous().view(N, S, self.hidden_dim)
+        # print(heads_cat.shape)
         out = self.out_proj(heads_cat)
 
 
@@ -321,12 +321,14 @@ class LayerNorm_fn(object):
         # should accept input of shape (*, D)                            #
         ##################################################################
         # Replace "pass" statement with your code
+        gamma = gamma.to(x.get_device())
+        beta = beta.to(x.get_device())
         mean = torch.mean(x, -1, keepdim=True)
-        var = torch.var(x, -1, keepdim=True)
+        var = torch.var(x, -1, unbiased=False, keepdim=True)
         diff = (x - mean) 
         vareps = var + eps
         sqrt = torch.sqrt(vareps)
-        isqrt = 1 / sqrt
+        isqrt = 1.0 / sqrt
         div = isqrt * diff
         out = gamma * div + beta
 
@@ -371,20 +373,24 @@ class LayerNorm_fn(object):
         #####################################################################
         # Replace "pass" statement with your code
         # dsigma = dout * mean * gamma / var**2
+        dims = (tuple(range(dout.dim() - 1)))
+        dgamma = torch.sum(dout * div, dim=dims)
 
-        dgamma = torch.sum(torch.sum(dout * div, dim=0), dim=0)
+        dbeta = torch.sum(dout, dim=dims)
 
-        dbeta = torch.sum(torch.sum(dout,dim=0), dim=0)
+        dxhat = dout * gamma
+        dx = isqrt * (dxhat - dxhat.mean(dim=-1, keepdim=True) - 
+                      div * (dxhat * div).mean(dim=-1, keepdim=True))
 
-        dout_norm = dout * gamma
+        # dout_norm = dout * gamma
 
-        dvar_full = dout_norm * diff * -0.5 * vareps ** -1.5
-        dvar = torch.sum(torch.sum(dvar_full, dim=0))
-        dmean1 = torch.sum(torch.sum(dout_norm *-1 * isqrt, dim=0))
-        dmean2 = dvar * -2 * diff
-        dmean = dmean1 + dmean2
+        # dvar_full = dout_norm * diff * -0.5 * vareps ** -1.5
+        # dvar = torch.sum(torch.sum(dvar_full, dim=0))
+        # dmean1 = torch.sum(torch.sum(dout_norm *-1 * isqrt, dim=0))
+        # dmean2 = dvar * -2 * diff
+        # dmean = dmean1 + dmean2
 
-        dx = dout_norm*isqrt + dvar * 2 * diff/D + dmean/D
+        # dx = dout_norm*isqrt + dvar * 2 * diff/D + dmean/D
 
         
         #                      END OF YOUR CODE                         #
@@ -432,7 +438,17 @@ class TransformerEncoder(Module):
         # (https://arxiv.org/abs/2010.11929) may be useful                  #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        self.norm1 = LayerNorm(embed_dim)
+        self.norm2 = LayerNorm(embed_dim)
+        if self.use_mhsa:
+            self.attn = MultiHeadAttention(embed_dim, hidden_dim, num_heads, dropout)
+        else:
+            self.attn = Attention(embed_dim, hidden_dim, dropout)
+        self.mlp = Sequential(
+            Linear(embed_dim, hidden_dim),
+            GELU(),
+            Linear(hidden_dim, embed_dim)
+            )
         #################################################################
         #                      END OF YOUR CODE                         #
         #################################################################
@@ -453,7 +469,12 @@ class TransformerEncoder(Module):
         # (https://arxiv.org/abs/2010.11929) may be useful                  #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        out_norm1 = self.norm1(x)
+        out_attn, attention = self.attn(out_norm1, out_norm1, out_norm1)
+        x = x + out_attn
+        x_norm = self.norm2(x)
+        out = self.mlp(x_norm)
+        out = out + x_norm
         #################################################################
         #                      END OF YOUR CODE                         #
         #################################################################
@@ -513,7 +534,17 @@ class VisionTransformer(Module):
         # (https://arxiv.org/abs/2010.11929) may be useful                  #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        self.in_proj = Linear(C*patch_size*patch_size, embed_dim)
+
+        self.transformer_layers = ModuleList([
+            TransformerEncoder(embed_dim, hidden_dim, use_mhsa, num_heads, dropout)
+            for _ in range(num_layers)
+        ])
+
+        self.mlp_head = Sequential(
+            LayerNorm(embed_dim),
+            Linear(embed_dim, num_classes)
+        )
         #################################################################
         #                      END OF YOUR CODE                         #
         #################################################################
@@ -580,7 +611,22 @@ class VisionTransformer(Module):
         # (https://arxiv.org/abs/2010.11929) may be useful        #
         ###########################################################
         # Replace "pass" statement with your code
-        pass
+        # print(x.get_device())
+        # print(self.cls_token.get_device())
+        x = patchify(x, self.patch_size)
+        x = self.in_proj(x)
+        N = x.shape[0]
+        
+        cls_token = self.cls_token.expand(N, -1, -1)
+        x = torch.cat((cls_token, x), dim=1)
+        x = x + self.pos_embedding
+
+        out_attention_maps = []
+        for layer in self.transformer_layers:
+            x, attention = layer(x)
+            out_attention_maps.append(attention)
+        out_cls = self.mlp_head(x[:,0])
+        out_tokens = x
         #################################################################
         #                      END OF YOUR CODE                         #
         #################################################################
@@ -622,7 +668,13 @@ def find_overfit_parameters():
     # model achieves 100% training accuracy within 50 epochs. #
     ###########################################################
     # Replace "pass" statement with your code
-    pass
+    embed_dim = 128
+    hidden_dim = 256
+    num_layers = 4
+    use_mhsa = True
+    num_heads = 1
+    weight_decay = 1e-6
+    learning_rate = 5e-4
     ###########################################################
     #                       END OF YOUR CODE                  #
     ###########################################################
@@ -637,7 +689,26 @@ def create_vit_solver_instance(data_dict, dtype, device):
     # on PROPS within 60 seconds.                           #
     #########################################################
     # Replace "pass" statement with your code
-    pass
+    model = VisionTransformer(
+        embed_dim=64,
+        hidden_dim=128,
+        num_layers=12,
+        use_mhsa=True,
+        num_heads=8,
+        dropout=0.1,
+        input_dims=(3,32,32),
+        num_classes=10,
+        patch_size=4,
+        dtype=dtype)
+    
+    solver = Solver(model,
+                    data_dict,
+                    num_epochs=100,
+                    batch_size = 64,
+                    weight_decay = 1e-6,
+                    learning_rate=5e-4,
+                    device=device,
+                    print_every=10)
     #########################################################
     #                  END OF YOUR CODE                     #
     #########################################################
